@@ -556,6 +556,8 @@ Input → Tokenization → Attention → Training → Generation → Output
 
 **Beweis: Systematische Herangehensweise + Domain-Expertise + Technische Umsetzung = Erfolgreiche ML-Lösung**
 
+**Final loss: 0.009; accuracy on our small, hand-crafted test set was 100%, likely due to the limited dataset and clear-cut labels (e.g., Pneumonia, Myocardial infarction). This should not be interpreted as clinical performance. www.kaggle.com/code/kjacoby/debugging-guide-t5-fine-tuning-true-bug**
+
 ---
 
 *Dieses Dokument zeigt, wie echte ML-Probleme in der Praxis gelöst werden: Nicht durch Glück oder Intuition, sondern durch systematische Analyse, methodisches Testen und schrittweise Problemlösung.*
