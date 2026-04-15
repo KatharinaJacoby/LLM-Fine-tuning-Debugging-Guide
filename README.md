@@ -1,6 +1,7 @@
 # Fixing T5 Fine-Tuning Bugs for Medical Diagnosis
 
 This notebook documents the debugging process of fine-tuning T5-small for medical diagnosis tasks. What started as a simple text-to-text classification project turned into a deep dive into tokenizer handling, generation bugs, and training instabilities.
+**Disclaimer**: this is for educational purposes only and not for actual medical diagnosis.
 
 ## Problem
 After training, the model only output `"True"` or repeated inputs. Despite a great loss curve, the outputs were useless.
