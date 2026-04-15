@@ -4,6 +4,7 @@
 
 ## 🎯 Projektziel
 Entwicklung eines medizinischen LLM zur Diagnose-Unterstützung mittels T5-Fine-tuning
+**Disclaimer**: Nur für Bildungszwecke- ist nicht für den medizinischen Einsatz geeignet.
 
 ---
 
