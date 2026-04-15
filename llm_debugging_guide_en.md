@@ -5,6 +5,7 @@
 ---
 ## 🎯 Project Goal
 Develop a medical LLM for diagnostic support using T5 fine-tuning.
+**Disclaimer**: this is for educational purposes only and not for actual medical diagnosis.
 
 ---
 ## 📋 Initial Situation
