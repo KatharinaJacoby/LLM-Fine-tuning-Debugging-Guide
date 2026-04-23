@@ -4,7 +4,7 @@
 
 Development of a medical LLM for diagnostic support using T5 fine-tuning for educational purposes only.
 
-The systematic debugging strategies outlined in this guide are well-established practices — the specific challenges encountered (T5 task prefixes, DataCollator tensorization issues, and generation parameter tuning) are common pitfalls. This guide serves as a structured, end-to-end case study for when things get messy — demonstrating how known principles are applied to navigate a concrete, real-world fine-tuning problem.
+This guide serves as a structured, end-to-end case study for when things get messy — demonstrating how known principles are applied to navigate a concrete, real-world fine-tuning problem. Documenting bugs and debugging methods is really important and sometimes can help the community even more than polished successful projects.
 
 ---
 
