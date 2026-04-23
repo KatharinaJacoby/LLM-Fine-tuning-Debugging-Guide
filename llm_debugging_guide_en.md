@@ -1,17 +1,18 @@
 # LLM Fine-tuning Debugging Guide
 
-**A Complete Walkthrough from First Problem to Working Medical LLM**
-
 ## 🎯 Project
-Development of a medical LLM for diagnostic support using T5 fine-tuning for educational purpose only! The systematic debugging strategies outlined in this guide are not novel discoveries. They represent standard, well-established practices routinely employed by many ML engineers. The specific challenges encountered (T5 task prefixes, DataCollator tensorization issues, and generation parameter tuning) are common pitfalls. This guide serves as a structured, end-to-end case study when things get messy. Demonstrating how these known principles are applied to navigate a concrete, real-world fine-tuning problem. 
+
+Development of a medical LLM for diagnostic support using T5 fine-tuning for educational purposes only.
+
+The systematic debugging strategies outlined in this guide are well-established practices — the specific challenges encountered (T5 task prefixes, DataCollator tensorization issues, and generation parameter tuning) are common pitfalls. This guide serves as a structured, end-to-end case study for when things get messy — demonstrating how known principles are applied to navigate a concrete, real-world fine-tuning problem.
 
 ---
 
 ## 📋 Initial Situation
 
 ### Original Code (Working but Limited)
-```
-python
+
+```python
 import pandas as pd
 import transformers
 import torch
@@ -71,16 +72,20 @@ print("Answer:", predict(test_prompt))
 
 ### First Results (Problematic but Functional)
 
-**Output:** "Pneumonia. DD: Pneumonia, Pneumonia" (repetitive)  
-**Loss:** 8.78 → 0.43 (very good)  
-**Problem:** Repetitive/incorrect differential diagnoses
+| Metric | Value |
+|--------|-------|
+| Output | "Pneumonia. DD: Pneumonia, Pneumonia" (repetitive) |
+| Loss | 8.78 → 0.43 (very good) |
+| Problem | Repetitive/incorrect differential diagnoses |
 
 ---
 
 ## 🚨 Problem Phase 1: Structural Improvement Leads to "True" Bug
 
 ### Attempt: Implement Extended Features
-**Goal:** 100 examples, validation split, better output structure  
+
+**Goal:** 100 examples, validation split, better output structure
+
 **Changes:**
 - Dataset expanded to 100 examples
 - Structured DD output: "Diagnosis: X | DD: Y, Z, W"
@@ -89,8 +94,9 @@ print("Answer:", predict(test_prompt))
 - `tokenizer` → `processing_class` parameter
 
 ### Problem: "True" Bug
+
 ```
-# Expected: "Pneumonia. DD: Bronchitis, Pleuritis"  
+# Expected: "Pneumonia. DD: Bronchitis, Pleuritis"
 # Actual: "True"
 ```
 
@@ -104,16 +110,16 @@ print("Answer:", predict(test_prompt))
 ## 🔍 Debugging Phase 1: Systematic Problem Identification
 
 ### Step 1: Parameter Instability Hypothesis
+
 **Observation:** Multiple deprecated/new parameters changed simultaneously
 - `evaluation_strategy` → TypeError
 - `processing_class` vs `tokenizer`
 - `text_target` vs `as_target_tokenizer()`
 
-**Hypothesis:** New parameters are unstable, old parameters work better
-
-> **Critical Reflection:** This turned out to be a detour. The real problems (missing task prefix, string columns in dataset) had nothing to do with API deprecation. You reach root causes faster by focusing on the model's actual behavior rather than library warning messages.
+**Insight:** "New parameters are unstable, old parameters work better" turned out to be a detour. The real problems (missing task prefix, string columns in dataset) had nothing to do with API deprecation. You reach root causes faster by focusing on the model's actual behavior rather than library warning messages.
 
 ### Step 2: Stepwise Regression
+
 **Strategy:** Change one variable at a time
 
 **Test 1: `as_target_tokenizer()` Fix**
@@ -132,6 +138,7 @@ with tokenizer.as_target_tokenizer():
 ## 🧹 Debugging Phase 2: Fresh Environment Strategy
 
 ### Step 3: Clean Slate Approach
+
 **Decision:** Fresh notebook, back to working baseline
 
 **Baseline Test (5 examples, original code):**
@@ -146,6 +153,7 @@ data = [original 5 examples without DD]
 ## 🔬 Debugging Phase 3: Pipeline Diagnosis
 
 ### Step 4: Labels Debug
+
 **Check:** Are labels correctly tokenized?
 ```python
 print("Sample tokenized data:")
@@ -155,6 +163,7 @@ print(f"Decoded Labels: {tokenizer.decode(tokenized_dataset[0]['labels'])}")
 **Result:** ✅ Labels perfect: "Pneumonia</s><pad>..."
 
 ### Step 5: Attention Mask Debug
+
 **Check:** Does attention mechanism work?
 ```python
 inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=True, max_length=128)
@@ -164,6 +173,7 @@ print(f"Attention mask sum: {inputs.attention_mask[0].sum()}")
 **Result:** ✅ Attention perfect: 36/36 tokens attended
 
 ### Step 6: EOS/PAD Token Debug
+
 **Check:** Token handling correct?
 ```python
 print(f"PAD token: '{tokenizer.pad_token}' -> ID: {tokenizer.pad_token_id}")
@@ -176,6 +186,7 @@ print(f"EOS token: '{tokenizer.eos_token}' -> ID: {tokenizer.eos_token_id}")
 ## 🚨 Problem Phase 2: DataCollator Crash
 
 ### Step 7: Label-Training-Pipeline Debug
+
 **Deeper Test:** What happens during training?
 
 **CRASH:**
@@ -184,9 +195,11 @@ ValueError: Unable to create tensor... Perhaps your features (`input` in this ca
 ```
 
 **Root Cause: String Features in Dataset**
+
+**Problem:** DataCollator cannot tensorize all features
 ```python
 tokenized_dataset.features = {
-    "input": "string",      # ❌ DataCollator crash  
+    "input": "string",      # ❌ DataCollator crash
     "output": "string",     # ❌ DataCollator crash
     "input_ids": "tensor",  # ✅ OK
     "labels": "tensor"      # ✅ OK
@@ -204,6 +217,7 @@ tokenized_dataset = tokenized_dataset.remove_columns(["input", "output"])
 ## 🔍 Debugging Phase 4: T5-Specific Problems
 
 ### Step 8: T5 Training Mode Check
+
 **Check:** Does T5 understand our task?
 
 **DISCOVERY:** T5 has task-specific parameters:
@@ -214,9 +228,10 @@ model.config.task_specific_params = {
     ...
 }
 ```
-**Problem:** T5 doesn't understand what to do without task prefix!
+**Problem:** T5 doesn't understand what to do without a task prefix!
 
 ### Step 9: Task Prefix Implementation
+
 ```python
 def tokenize_with_task_prefix(example):
     task_prefixed_input = f"medical diagnosis: {example['input']}"
@@ -232,6 +247,7 @@ def tokenize_with_task_prefix(example):
 ## 🚨 Problem Phase 3: PAD Token Loop
 
 ### Step 10: Generation Mechanism Debug
+
 **Problem:** Model generates only PAD tokens `[0,0,0,...]`
 
 **Deep Debug:**
@@ -249,26 +265,23 @@ print(f"Raw tokens: {outputs[0]}")
 - Or is decoder-start mechanism broken?
 
 ### Step 11: A/B Test Strategy
+
 **Test 1:** Continue Training (+20 epochs)  
 **Test 2:** Fresh Training (30 epochs from scratch)
 
-**Continue Training Result:**
-- Loss: 2.0 → 0.15-0.30
-- Output: "Morbus Morbus Morbus..." ✅ (medical terms, but repetitive)
+| Test | Loss | Output |
+|------|------|--------|
+| Continue Training | 2.0 → 0.15-0.30 | "Morbus Morbus Morbus..." ✅ (medical terms, but repetitive) |
+| Fresh Training | 10.1 → 0.30-0.85 | "" (empty, PAD tokens) |
 
-**Fresh Training Result:**
-- Loss: 10.1 → 0.30-0.85
-- Output: "" (empty, PAD tokens)
-
-**Conclusion:** Continue training appeared better than fresh!
-
-> **Critical Reflection:** This conclusion is potentially misleading. It's more likely an artifact of optimizer state, cached gradients, or learning rate scheduling. Sometimes continuing a corrupted training run is worse than starting fresh. The guide doesn't interrogate why continuation worked here, which is the actually interesting question.
+**Insight:** It's likely an artifact of optimizer state, cached gradients, or learning rate scheduling. Sometimes continuing a corrupted training run is worse than starting fresh.
 
 ---
 
 ## 🎯 Breakthrough Phase: Generation Parameter Optimization
 
 ### Step 12: Improved Generation Parameters
+
 **Problem:** Repetitive output ("Morbus Morbus Morbus...")
 
 **Solution: Advanced generation parameters**
@@ -276,7 +289,7 @@ print(f"Raw tokens: {outputs[0]}")
 def predict_improved(prompt):
     prefixed_prompt = f"medical diagnosis: {prompt}"
     inputs = tokenizer(prefixed_prompt, return_tensors="pt", padding=True, truncation=True)
-    
+
     outputs = model.generate(
         input_ids=inputs.input_ids,
         attention_mask=inputs.attention_mask,
@@ -297,41 +310,29 @@ def predict_improved(prompt):
 
 ---
 
-## 🚀 Final Phase: Scale & Training Optimization
+## 🚀 Final Phase: Debugging Complete, Ready for Real Training
 
-### Step 13: Dataset & Training Scale-Up
-**Strategy:** More data + more intensive training
+### Step 13: Preparing the Baseline
 
-**Scaling:**
-- 25 → 160 examples (6x more data)
-- 30 → 40 epochs (more training)
-- 19 medical specialties covered
+At this stage, the debugging is complete. The pipeline is stable, the model architecture is understood, and the generation parameters are tuned. The code below represents the functional baseline required to begin serious training.
 
-**Optimized Training Parameters:**
-```python
-training_args = TrainingArguments(
-    output_dir="./results",
-    per_device_train_batch_size=4,  # Larger batches
-    num_train_epochs=40,            # More epochs
-    learning_rate=3e-4,             # Optimized LR
-    warmup_steps=50,                # Warmup for stability
-    logging_steps=10,
-    save_strategy="no",
-    report_to="none"
-)
-```
+> **Note:** The "160 examples, 40 epochs, loss 0.009" scenario mentioned previously was a stress test to confirm the pipeline works. It is not the final model. Real training requires:
+> - A larger, diverse dataset
+> - Proper train/validation/test splits
+> - Hyperparameter tuning for generalization, not just loss minimization
+> - Rigorous validation against overfitting
 
-**Final Training Results:**
-- Loss: 9.9 → 0.009
-- 160 examples successfully trained
-- 40 epochs with perfect convergence
+The goal of this guide was to get the system to a state where training can happen reliably.
+
+### Overfitting Risk
+
+160 examples, 40 epochs, loss of 0.009, 100% accuracy on 5 hand-crafted test cases — this is almost certainly overfitting. The model likely memorized the training data.
+
+**Next Steps for Production:**
+
+Before deploying, you must implement a proper validation strategy (hold-out sets, cross-validation, and out-of-distribution testing) to ensure the model generalizes beyond the training data.
 
 ---
-
-## ⚠️ This is probably due to Overfitting 
-
-> 160 examples, 40 epochs, loss of 0.009, 100% accuracy on 5 hand-crafted test cases — this is almost certainly overfitting. The model likely memorized the training data. 
-
 
 ## 📋 Debugging Steps Summary
 
@@ -356,13 +357,14 @@ training_args = TrainingArguments(
    - Parameter tuning for anti-repetition
    - Beam search for better quality
 
-5. **Scale & Training Optimization**
-   - Dataset size as critical factor
-   - Training volume for complex tasks
+5. **Pipeline Stability**
+   - Confirmed the system can train without crashing
+   - Confirmed the system can generate non-empty output
+   - Ready for scaling data and hyperparameter tuning
 
 ---
 
-## 🛠️ Final Code Solution
+## 🛠️ Final Debugged Code (Ready for Training)
 
 ```python
 import pandas as pd
@@ -372,14 +374,14 @@ from transformers import T5Tokenizer, T5ForConditionalGeneration
 from datasets import Dataset
 from transformers import DataCollatorForSeq2Seq, Trainer, TrainingArguments
 
-# LARGE DATABASE: 160 medical examples
+# DATA PREPARATION: Replace with your full, diverse dataset
 data = [
-    # ... [160 examples from 19 specialties]
+    # ... [Your full dataset here]
 ]
 
 tokenizer = T5Tokenizer.from_pretrained("t5-small")
 
-# T5 TASK PREFIX (critical for T5 performance)
+# T5 TASK PREFIX (Critical for T5 performance)
 def tokenize_with_task_prefix(example):
     task_prefixed_input = f"medical diagnosis: {example['input']}"
     input_enc = tokenizer(task_prefixed_input, truncation=True, padding="max_length", max_length=128)
@@ -390,20 +392,22 @@ def tokenize_with_task_prefix(example):
 dataset = Dataset.from_pandas(data)
 tokenized_dataset = dataset.map(tokenize_with_task_prefix)
 
-# DATACOLLATOR FIX: Remove string features
+# DATACOLLATOR FIX: Remove string features to prevent crashes
 tokenized_dataset = tokenized_dataset.remove_columns(["input", "output"])
 
 model = T5ForConditionalGeneration.from_pretrained("t5-small")
 
-# OPTIMIZED TRAINING PARAMETERS
+# TRAINING ARGUMENTS: Tuned for stability
 training_args = TrainingArguments(
     output_dir="./results",
     per_device_train_batch_size=4,
-    num_train_epochs=40,
+    num_train_epochs=40,          # Adjust based on validation performance
     learning_rate=3e-4,
     warmup_steps=50,
     logging_steps=10,
-    save_strategy="no",
+    evaluation_strategy="epoch",  # Recommended: Monitor validation loss
+    save_strategy="epoch",
+    load_best_model_at_end=True,
     report_to="none"
 )
 
@@ -416,13 +420,14 @@ trainer = Trainer(
     data_collator=data_collator
 )
 
+# START REAL TRAINING HERE
 trainer.train()
 
 # OPTIMIZED PREDICTION FUNCTION
 def predict_medical_diagnosis(prompt):
     prefixed_prompt = f"medical diagnosis: {prompt}"
     inputs = tokenizer(prefixed_prompt, return_tensors="pt", padding=True, truncation=True)
-    
+
     outputs = model.generate(
         input_ids=inputs.input_ids,
         attention_mask=inputs.attention_mask,
@@ -437,26 +442,33 @@ def predict_medical_diagnosis(prompt):
 # TEST
 test_prompt = "Symptoms: Shortness of breath, fever, CRP 90, X-ray: Right infiltrate. What is the most likely diagnosis?"
 result = predict_medical_diagnosis(test_prompt)
-print(f"Diagnosis: {result}")  # Output: "Pneumonia"
+print(f"Diagnosis: {result}")
 ```
 
 ---
 
 ## 📊 Critical Success Factors
 
-### ✅ Must-Have Components:
-- **T5 Task Prefix:** `"medical diagnosis: "` - Essential for T5 understanding
-- **DataCollator Fix:** Remove string features
-- **Sufficient Data:** At least 100+ examples for complex mappings
-- **Advanced Generation:** Repetition penalty, beam search, early stopping
-- **Training Volume:** 40+ epochs for task learning
+### ✅ Must-Have Components
 
-### ❌ Common Pitfalls:
-- **Deprecated Parameters:** New APIs not always more stable
-- **Fresh vs Continue:** Continue training can be better than fresh (but investigate why)
-- **Cache/Memory Issues:** Fresh environment solves many problems
-- **Generation Parameters:** Standard parameters often insufficient
-- **Dataset Size:** Too small datasets lead to overfitting/repetition
+| Component | Purpose |
+|-----------|---------|
+| T5 Task Prefix | `"medical diagnosis: "` — Essential for T5 understanding |
+| DataCollator Fix | Remove string features |
+| Sufficient Data | At least 100+ examples for complex mappings |
+| Advanced Generation | Repetition penalty, beam search, early stopping |
+| Training Volume | Adequate epochs for task learning |
+
+### ❌ Common Pitfalls
+
+| Pitfall | Risk |
+|---------|------|
+| Deprecated Parameters | New APIs not always more stable |
+| Fresh vs Continue | Continue training can be better than fresh (but investigate why) |
+| Cache/Memory Issues | Fresh environment solves many problems |
+| Generation Parameters | Standard parameters often insufficient |
+| Dataset Size | Too small datasets lead to overfitting/repetition |
+| Overfitting Misread as Success | Near-zero loss on a small dataset is a warning sign, not a victory |
 
 ---
 
@@ -480,7 +492,7 @@ Test each step systematically
 - Enable controlled experiments
 
 ### 4. Parameter Instability Recognition
-- Take deprecated warnings seriously
+- Take deprecated warnings seriously — but don't chase them at the expense of investigating actual model behavior
 - Cross-pattern recognition between different errors
 - Conservative parameter choice when uncertain
 
@@ -489,48 +501,59 @@ Test each step systematically
 - Encoder-decoder models have special requirements
 - Generation parameters are critical for output quality
 
+### 6. Interrogate Apparent Findings
+- "Continue training worked better" — why? Optimizer state? Learning rate schedule? Don't generalize without understanding the mechanism.
+- "Loss dropped to 0.009" — on how many examples? With how many epochs? Near-zero loss on small data is overfitting until proven otherwise.
+
 ---
 
 ## 🎯 Final Insights
 
-### What Worked:
-- Medicine debugging principles → ML engineering
-- Systematic differential diagnosis → Bug isolation
-- "Better safe than sorry" → Conservative development
-- Fresh environment strategy → Clean testing
-- Cross-pattern recognition → Root cause analysis
+### What Worked
 
-### Performance Metrics (With Caveats):
-- **Training Loss:** 9.9 → 0.009 (99.9% improvement)
-- **Test Accuracy:** 100% on 5 different medical cases (training distribution)
-- **Specialty Coverage:** 19 medical specialties
-- **Debugging Time:** ~3 hours systematic analysis
+| Principle | Application |
+|-----------|-------------|
+| Medicine debugging principles | → ML engineering |
+| Systematic differential diagnosis | → Bug isolation |
+| "Better safe than sorry" | → Conservative development |
+| Fresh environment strategy | → Clean testing |
+| Cross-pattern recognition | → Root cause analysis |
 
-> ⚠️ **Note:** These metrics reflect training performance, not generalization capability.
+### Performance Metrics (With Caveats)
+
+| Metric | Value | Note |
+|--------|-------|------|
+| Training Loss | 9.9 → 0.009 | 99.9% improvement — likely overfitting |
+| Test Accuracy | 100% on 5 cases | Training distribution only |
+| Specialty Coverage | 19 medical specialties | — |
+| Debugging Time | ~3 hours | Systematic analysis |
+
+> ⚠️ **Note:** These metrics reflect training performance, not generalization capability. The debugging phase is now complete; the next phase is rigorous training and validation.
 
 ---
 
-
 ## 💡 Key Takeaways for ML Engineering
 
-### 1. Debugging is a Systematic Process
-Don't guess, test methodically
+### 1. Debugging Is a Systematic Process
+Don't guess — test methodically
 
 ### 2. Domain Knowledge + Technical Skills = Success
-Medical expertise + ML engineering = Powerful combination
+Medical expertise + ML engineering = powerful combination
 
-### 3. Fresh Environment is a Powerful Tool
+### 3. Fresh Environment Is a Powerful Tool
 "Turn it off and on again" works for ML too
 
 ### 4. Conservative Parameter Choice Pays Off
 Old, stable parameters > new, unstable parameters
 
-### 5. Model-Specific Requirements are Critical
+### 5. Model-Specific Requirements Are Critical
 T5, BERT, GPT all have different best practices
 
 ### 6. Success Metrics Require Context
-Low loss + high accuracy on small test set ≠ production-ready model  
-Always validate generalization before deployment
+Low loss + high accuracy on small test set ≠ production-ready model. Always validate generalization before deployment.
+
+### 7. Focus on Behavior, Not Warnings
+Chasing deprecation messages feels productive but can waste time. Prioritize investigating what the model is actually doing over what the library is complaining about.
 
 ---
 
